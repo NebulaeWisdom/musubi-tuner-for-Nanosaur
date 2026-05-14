@@ -2,9 +2,9 @@
 set -euo pipefail
 
 DATASET_CONFIG=${DATASET_CONFIG:-examples/nanosaur_dataset.toml}
-MODEL_DIR=${MODEL_DIR:-../../nanosaur_support}
-CACHE_DIR=${CACHE_DIR:-../../cache/nanosaur_1024_fp16}
-OUTPUT_DIR=${OUTPUT_DIR:-../../outputs/nanosaur_musubi_lora}
+MODEL_DIR=${MODEL_DIR:-../model}
+CACHE_DIR=${CACHE_DIR:-../cache/nanosaur_1024_fp16}
+OUTPUT_DIR=${OUTPUT_DIR:-../outputs/nanosaur_musubi_lora}
 
 python -m musubi_tuner.nanosaur_cache_latents \
   --dataset_config "${DATASET_CONFIG}" \
@@ -16,7 +16,7 @@ python -m musubi_tuner.nanosaur_cache_latents \
 python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
   --dataset_config "${DATASET_CONFIG}" \
   --text_encoder "${MODEL_DIR}/nanosaur_text_encoder.safetensors" \
-  --text_encoder_dtype fp16 \
+  --text_encoder_dtype bf16 \
   --batch_size 8 \
   --skip_existing
 

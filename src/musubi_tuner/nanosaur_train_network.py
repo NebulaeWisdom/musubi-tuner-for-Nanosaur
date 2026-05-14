@@ -134,7 +134,7 @@ class NanoSaurNetworkTrainer(NetworkTrainer):
         denom = (t + 0.05).view(shape)
         velocity = (zt - x0_pred) / denom
         target = (zt - latents) / denom
-        return velocity, target
+        return velocity.to(dtype=network_dtype), target.to(dtype=network_dtype)
 
 
 def nanosaur_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

@@ -1,5 +1,5 @@
 import math
-import tempfile
+import sys
 from pathlib import Path
 
 import sentencepiece as spm
@@ -12,10 +12,22 @@ try:
     from nanosaur_support.model import NanoSaurTransformer2DModel
     from nanosaur_support.vae import NanoSaurVAE
 except ImportError as exc:  # pragma: no cover - keeps import error actionable for users
-    raise ImportError(
-        "NanoSaur support modules were not found. Run musubi-tuner from the Nanosaur-1.2B-Train "
-        "repository root or add that repository to PYTHONPATH."
-    ) from exc
+    repo_root = Path(__file__).resolve().parents[3]
+    if (repo_root / "nanosaur_support").is_dir():
+        sys.path.insert(0, str(repo_root))
+        try:
+            from nanosaur_support.model import NanoSaurTransformer2DModel
+            from nanosaur_support.vae import NanoSaurVAE
+        except ImportError:
+            raise ImportError(
+                "NanoSaur support modules were not found. Run musubi-tuner from the repository root "
+                "or add that repository root to PYTHONPATH."
+            ) from exc
+    else:
+        raise ImportError(
+            "NanoSaur support modules were not found. Run musubi-tuner from the repository root "
+            "or add that repository root to PYTHONPATH."
+        ) from exc
 
 
 TEXT_MAX_LENGTH = 128
@@ -97,12 +109,11 @@ class NanoSaurVAEWrapper:
 class NanoSaurSentencePieceTokenizer:
     def __init__(self, spiece_model: torch.Tensor, max_length: int = TEXT_MAX_LENGTH) -> None:
         self.max_length = max_length
-        model_bytes = bytes(spiece_model.cpu().numpy().tolist())
+        if spiece_model.dtype != torch.uint8 or spiece_model.dim() != 1:
+            raise ValueError(f"spiece_model must be a 1D torch.uint8 tensor, got shape={tuple(spiece_model.shape)}, dtype={spiece_model.dtype}")
+        model_bytes = spiece_model.detach().cpu().contiguous().numpy().tobytes()
         self.processor = spm.SentencePieceProcessor()
-        with tempfile.NamedTemporaryFile(suffix=".model") as handle:
-            handle.write(model_bytes)
-            handle.flush()
-            self.processor.Load(handle.name)
+        self.processor.LoadFromSerializedProto(model_bytes)
         self.bos_token_id = 2
         self.pad_token_id = 0
 

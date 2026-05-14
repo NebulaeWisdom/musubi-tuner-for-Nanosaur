@@ -37,29 +37,29 @@
 本文假设你在这个大仓库里工作：
 
 ```text
-Nanosaur-1.2B-Train/
+<repo-root>/
 ├─ download_model.py
 ├─ dataset/
-├─ nanosaur_support/
+├─ model/
 │  ├─ nanosaur_diffusion_model.safetensors
 │  ├─ nanosaur_text_encoder.safetensors
 │  └─ nanosaur_vae_decoder.safetensors
-└─ trainer/
-   └─ musubi-tuner/
-      ├─ src/musubi_tuner/
-      │  ├─ nanosaur_cache_latents.py
-      │  ├─ nanosaur_cache_text_encoder_outputs.py
-      │  ├─ nanosaur_train_network.py
-      │  ├─ nanosaur_utils.py
-      │  └─ networks/lora_nanosaur.py
-      ├─ examples/nanosaur_dataset.toml
-      └─ examples/nanosaur_minimal_train.sh
+├─ nanosaur_support/
+└─ musubi-tuner/
+   ├─ src/musubi_tuner/
+   │  ├─ nanosaur_cache_latents.py
+   │  ├─ nanosaur_cache_text_encoder_outputs.py
+   │  ├─ nanosaur_train_network.py
+   │  ├─ nanosaur_utils.py
+   │  └─ networks/lora_nanosaur.py
+   ├─ examples/nanosaur_dataset.toml
+   └─ examples/nanosaur_minimal_train.sh
 ```
 
 推荐从 musubi-tuner 目录运行命令：
 
 ```bash
-cd trainer/musubi-tuner
+cd musubi-tuner
 ```
 
 ---
@@ -73,17 +73,17 @@ cd trainer/musubi-tuner
 #### Linux / WSL / Git Bash
 
 ```bash
-cd Nanosaur-1.2B-Train
-python -m venv .venv
-source .venv/bin/activate
+cd <repo-root>
+python -m venv venv
+source venv/bin/activate
 ```
 
 #### Windows PowerShell
 
 ```powershell
-cd Nanosaur-1.2B-Train
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+cd <repo-root>
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 ```
 
 ### 3.2 安装依赖
@@ -97,9 +97,17 @@ pip install -r requirements.txt
 然后进入 musubi-tuner，安装 musubi 自身：
 
 ```bash
-cd trainer/musubi-tuner
+cd musubi-tuner
 pip install -e .
 ```
+
+Windows 本地 smoke test 发现：`sentencepiece==0.2.1` 在读取 NanoSaur 权重内置的 SentencePiece tokenizer proto 时可能直接段错误；建议在项目 venv 内使用已验证的版本：
+
+```bash
+pip install sentencepiece==0.1.99
+```
+
+注意不要在系统/base Python 环境安装这些依赖。
 
 如果缺少 ModelScope 下载依赖：
 
@@ -134,16 +142,16 @@ accelerate launch --num_processes 1 ...
 回到项目根目录：
 
 ```bash
-cd Nanosaur-1.2B-Train
+cd <repo-root>
 python download_model.py
 ```
 
 该脚本会下载：
 
 ```text
-nanosaur_support/nanosaur_diffusion_model.safetensors
-nanosaur_support/nanosaur_text_encoder.safetensors
-nanosaur_support/nanosaur_vae_decoder.safetensors
+model/nanosaur_diffusion_model.safetensors
+model/nanosaur_text_encoder.safetensors
+model/nanosaur_vae_decoder.safetensors
 ```
 
 模型来源：
@@ -155,7 +163,7 @@ xiaobaibai030/well9472-Nanosaur-1.2B-Preview
 下载完成后检查：
 
 ```bash
-ls nanosaur_support
+ls model
 ```
 
 至少应看到：
@@ -222,7 +230,7 @@ musubi-tuner 使用 TOML 配置数据集。
 已提供示例：
 
 ```text
-trainer/musubi-tuner/examples/nanosaur_dataset.toml
+musubi-tuner/examples/nanosaur_dataset.toml
 ```
 
 内容：
@@ -235,16 +243,16 @@ batch_size = 1
 enable_bucket = false
 
 [[datasets]]
-image_directory = "../../../dataset"
-cache_directory = "../../../cache/nanosaur_1024_fp16"
+image_directory = "../dataset"
+cache_directory = "../cache/nanosaur_1024_fp16"
 num_repeats = 1
 ```
 
-如果你在 `trainer/musubi-tuner` 目录运行命令，上面的相对路径指向：
+如果你在 `musubi-tuner` 目录运行命令，上面的相对路径指向：
 
 ```text
-../../../dataset
-../../../cache/nanosaur_1024_fp16
+../dataset
+../cache/nanosaur_1024_fp16
 ```
 
 也就是大仓库根目录下的：
@@ -276,7 +284,7 @@ cache_directory = "/path/to/your/cache/nanosaur_1024_fp16"
 进入 musubi-tuner：
 
 ```bash
-cd trainer/musubi-tuner
+cd musubi-tuner
 ```
 
 运行：
@@ -284,7 +292,7 @@ cd trainer/musubi-tuner
 ```bash
 python -m musubi_tuner.nanosaur_cache_latents \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --vae ../../nanosaur_support/nanosaur_vae_decoder.safetensors \
+  --vae ../model/nanosaur_vae_decoder.safetensors \
   --vae_dtype fp16 \
   --batch_size 4 \
   --skip_existing
@@ -323,8 +331,8 @@ cache/nanosaur_1024_fp16/image002_1024x1024_ns.safetensors
 ```bash
 python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --text_encoder ../../nanosaur_support/nanosaur_text_encoder.safetensors \
-  --text_encoder_dtype fp16 \
+  --text_encoder ../model/nanosaur_text_encoder.safetensors \
+  --text_encoder_dtype bf16 \
   --batch_size 8 \
   --skip_existing
 ```
@@ -362,9 +370,9 @@ uncond embed       -> --uncond_text_embedding
 accelerate launch --num_processes 1 \
   -m musubi_tuner.nanosaur_train_network \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --dit ../../nanosaur_support/nanosaur_diffusion_model.safetensors \
-  --vae ../../nanosaur_support/nanosaur_vae_decoder.safetensors \
-  --uncond_text_embedding ../../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
+  --dit ../model/nanosaur_diffusion_model.safetensors \
+  --vae ../model/nanosaur_vae_decoder.safetensors \
+  --uncond_text_embedding ../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
   --network_module musubi_tuner.networks.lora_nanosaur \
   --network_dim 16 \
   --network_alpha 4 \
@@ -374,7 +382,7 @@ accelerate launch --num_processes 1 \
   --sdpa \
   --max_train_steps 1000 \
   --save_every_n_steps 500 \
-  --output_dir ../../outputs/nanosaur_musubi_lora \
+  --output_dir ../outputs/nanosaur_musubi_lora \
   --output_name nanosaur_lora
 ```
 
@@ -409,7 +417,7 @@ examples/nanosaur_minimal_train.sh
 运行：
 
 ```bash
-cd trainer/musubi-tuner
+cd musubi-tuner
 bash examples/nanosaur_minimal_train.sh
 ```
 
@@ -423,9 +431,9 @@ bash examples/nanosaur_minimal_train.sh
 
 ```bash
 DATASET_CONFIG=examples/my_nanosaur_dataset.toml \
-MODEL_DIR=../../nanosaur_support \
-CACHE_DIR=../../cache/nanosaur_1024_fp16 \
-OUTPUT_DIR=../../outputs/my_nanosaur_lora \
+MODEL_DIR=../model \
+CACHE_DIR=../cache/nanosaur_1024_fp16 \
+OUTPUT_DIR=../outputs/my_nanosaur_lora \
 bash examples/nanosaur_minimal_train.sh
 ```
 
@@ -439,9 +447,9 @@ bash examples/nanosaur_minimal_train.sh
 accelerate launch --num_processes 4 \
   -m musubi_tuner.nanosaur_train_network \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --dit ../../nanosaur_support/nanosaur_diffusion_model.safetensors \
-  --vae ../../nanosaur_support/nanosaur_vae_decoder.safetensors \
-  --uncond_text_embedding ../../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
+  --dit ../model/nanosaur_diffusion_model.safetensors \
+  --vae ../model/nanosaur_vae_decoder.safetensors \
+  --uncond_text_embedding ../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
   --network_module musubi_tuner.networks.lora_nanosaur \
   --network_dim 16 \
   --network_alpha 4 \
@@ -451,7 +459,7 @@ accelerate launch --num_processes 4 \
   --gradient_accumulation_steps 4 \
   --max_train_steps 1000 \
   --save_every_n_steps 500 \
-  --output_dir ../../outputs/nanosaur_musubi_lora \
+  --output_dir ../outputs/nanosaur_musubi_lora \
   --output_name nanosaur_lora
 ```
 
@@ -483,11 +491,11 @@ global_batch_size = dataset batch_size × num_processes × gradient_accumulation
 accelerate launch --num_processes 1 \
   -m musubi_tuner.nanosaur_train_network \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --dit ../../nanosaur_support/nanosaur_diffusion_model.safetensors \
-  --vae ../../nanosaur_support/nanosaur_vae_decoder.safetensors \
-  --uncond_text_embedding ../../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
+  --dit ../model/nanosaur_diffusion_model.safetensors \
+  --vae ../model/nanosaur_vae_decoder.safetensors \
+  --uncond_text_embedding ../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
   --network_module musubi_tuner.networks.lora_nanosaur \
-  --network_weights ../../outputs/nanosaur_musubi_lora/nanosaur_lora-000000500.safetensors \
+  --network_weights ../outputs/nanosaur_musubi_lora/nanosaur_lora-000000500.safetensors \
   --network_dim 16 \
   --network_alpha 4 \
   --learning_rate 1e-4 \
@@ -495,7 +503,7 @@ accelerate launch --num_processes 1 \
   --sdpa \
   --max_train_steps 2000 \
   --save_every_n_steps 500 \
-  --output_dir ../../outputs/nanosaur_musubi_lora_resume \
+  --output_dir ../outputs/nanosaur_musubi_lora_resume \
   --output_name nanosaur_lora_resume
 ```
 
@@ -568,18 +576,18 @@ nanosaur_support.model
 nanosaur_support.vae
 ```
 
-请从 `Nanosaur-1.2B-Train` 仓库内运行，或把仓库根目录加入 `PYTHONPATH`。
+当前代码会在常规仓库布局下自动把 `<repo-root>` 仓库根目录加入导入路径。若你移动了 `musubi-tuner` 目录，或仍然遇到该错误，请手动把仓库根目录加入 `PYTHONPATH`。
 
-如果你在 `trainer/musubi-tuner` 下运行，通常可以：
+如果你在 `musubi-tuner` 下运行，通常可以：
 
 ```bash
-export PYTHONPATH=../../:$PYTHONPATH
+export PYTHONPATH=..:$PYTHONPATH
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:PYTHONPATH = "..\..;$env:PYTHONPATH"
+$env:PYTHONPATH = "..;$env:PYTHONPATH"
 ```
 
 ### 15.3 CUDA 显存不足
@@ -608,8 +616,8 @@ max_train_steps = 100
 ```bash
 python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --text_encoder ../../nanosaur_support/nanosaur_text_encoder.safetensors \
-  --text_encoder_dtype fp16 \
+  --text_encoder ../model/nanosaur_text_encoder.safetensors \
+  --text_encoder_dtype bf16 \
   --batch_size 8 \
   --skip_existing
 ```
@@ -619,6 +627,45 @@ python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
 正常。当前 NanoSaur 最小实现暂不支持训练中 sample。
 
 先不要传 `--sample_prompts`。
+
+### 15.6 Windows 上 text encoder cache 段错误或 Permission denied
+
+本地 Windows smoke test 中发现两个独立问题：
+
+- `sentencepiece==0.2.1` 读取 NanoSaur text encoder safetensors 内置的 `spiece_model` 时可能在原生层段错误；
+- 旧代码通过 `NamedTemporaryFile` 落盘再让 SentencePiece 打开，在 Windows 上会因为临时文件仍被当前进程占用而触发 `Permission denied`。Linux 通常允许这种文件访问模式，但直接从内存加载 serialized proto 更不依赖操作系统文件语义。
+
+处理方式：
+
+1. 在项目 venv 内使用 `sentencepiece==0.1.99`，规避本地观察到的 `0.2.1` native segfault；
+2. 当前代码已改为 `SentencePieceProcessor.LoadFromSerializedProto(...)`，不再通过临时文件加载 tokenizer，Windows/Linux 都可用。
+
+性能影响：tokenizer 只在 text encoder 初始化时加载一次；`LoadFromSerializedProto` 避免临时文件 I/O，且当前实现直接从 `uint8` tensor 转 bytes，不会影响训练迭代性能。
+
+### 15.7 text cache 全是 NaN
+
+本地 RTX 5080 测试中，`--text_encoder_dtype fp16` 会让 Gemma text encoder 输出 NaN，保存逻辑会把 NaN 替换为 0，导致文本条件基本失效。
+
+请使用：
+
+```bash
+--text_encoder_dtype bf16
+```
+
+或使用 `fp32`。训练本身仍建议 `--mixed_precision bf16`。
+
+### 15.8 保存 LoRA 时报 `Unknown architecture: ns`
+
+这是 metadata 注册缺失导致的代码问题。当前已在 `sai_model_spec.py` 中注册 NanoSaur metadata：
+
+```text
+modelspec.architecture = Nanosaur-1.2B/lora
+ss_base_model_version = nanosaur
+```
+
+### 15.9 backward 报 `Found dtype Half but expected Float`
+
+这是 NanoSaur trainer 中 `model_pred` 与 `target` dtype 未统一导致的反传错误。当前已在 `nanosaur_train_network.py` 中将二者统一到 `network_dtype` 后再计算 loss。
 
 ---
 
@@ -636,9 +683,9 @@ python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
 accelerate launch --num_processes 1 \
   -m musubi_tuner.nanosaur_train_network \
   --dataset_config ./examples/nanosaur_dataset.toml \
-  --dit ../../nanosaur_support/nanosaur_diffusion_model.safetensors \
-  --vae ../../nanosaur_support/nanosaur_vae_decoder.safetensors \
-  --uncond_text_embedding ../../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
+  --dit ../model/nanosaur_diffusion_model.safetensors \
+  --vae ../model/nanosaur_vae_decoder.safetensors \
+  --uncond_text_embedding ../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
   --network_module musubi_tuner.networks.lora_nanosaur \
   --network_dim 8 \
   --network_alpha 4 \
@@ -647,7 +694,7 @@ accelerate launch --num_processes 1 \
   --sdpa \
   --max_train_steps 100 \
   --save_every_n_steps 50 \
-  --output_dir ../../outputs/nanosaur_smoke_test \
+  --output_dir ../outputs/nanosaur_smoke_test \
   --output_name nanosaur_smoke
 ```
 
@@ -657,6 +704,31 @@ accelerate launch --num_processes 1 \
 nanosaur_smoke-000000050.safetensors
 nanosaur_smoke-000000050-comfyui.safetensors
 ```
+
+### 16.1 本地验证记录
+
+在 `<repo-root>` 的项目 venv 中完成过一次真实 smoke test：
+
+- GPU：RTX 5080 16GB；
+- Python：项目内 `venv`；
+- PyTorch：`2.8.0+cu128`；
+- `sentencepiece`：`0.1.99`；
+- dataset：97 张图片，其中 1 张缺同名 `.txt`，当前数据加载仍会为其生成空 caption cache；
+- latent cache：97 个 `*_ns.safetensors`；
+- text cache：97 个 `*_ns_te.safetensors` + `uncond_ns_te.safetensors`；
+- 训练：`max_train_steps=1`，`network_dim=4`，`mixed_precision=bf16`，`optimizer_type=AdamW`；
+- 输出目录：`outputs/nanosaur_smoke_lora/`。
+
+已验证生成并可加载：
+
+```text
+outputs/nanosaur_smoke_lora/nanosaur_smoke_lora.safetensors
+outputs/nanosaur_smoke_lora/nanosaur_smoke_lora-comfyui.safetensors
+outputs/nanosaur_smoke_lora/nanosaur_smoke_lora-step00000001.safetensors
+outputs/nanosaur_smoke_lora/nanosaur_smoke_lora-step00000001-comfyui.safetensors
+```
+
+其中训练格式 LoRA 约 7.4 MB，包含 266 个 LoRA tensor；ComfyUI 导出约 7.4 MB，包含 399 个 tensor，metadata 中 `modelspec.architecture` 为 `Nanosaur-1.2B/lora`。
 
 ---
 

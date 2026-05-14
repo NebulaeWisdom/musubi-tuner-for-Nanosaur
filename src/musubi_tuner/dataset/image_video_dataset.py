@@ -93,6 +93,8 @@ ARCHITECTURE_HUNYUAN_VIDEO_1_5 = "hv15"
 ARCHITECTURE_HUNYUAN_VIDEO_1_5_FULL = "hunyuan_video_1_5"
 ARCHITECTURE_Z_IMAGE = "zi"
 ARCHITECTURE_Z_IMAGE_FULL = "z_image"
+ARCHITECTURE_NANOSAUR = "ns"
+ARCHITECTURE_NANOSAUR_FULL = "nanosaur"
 
 
 def glob_images(directory, base="*", caption_extension=None):
@@ -431,6 +433,18 @@ def save_latent_cache_z_image(item_info: ItemInfo, latent: torch.Tensor):
     save_latent_cache_common(item_info, sd, ARCHITECTURE_Z_IMAGE_FULL)
 
 
+def save_latent_cache_nanosaur(item_info: ItemInfo, latent: torch.Tensor):
+    """NanoSaur architecture. No control latent is supported."""
+    assert latent.dim() == 3, "latent should be 3D tensor (channel, height, width)"
+
+    C, H, W = latent.shape
+    F = 1
+    dtype_str = dtype_to_str(latent.dtype)
+    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous()}
+
+    save_latent_cache_common(item_info, sd, ARCHITECTURE_NANOSAUR_FULL)
+
+
 def save_latent_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
     metadata = {
         "architecture": arch_fullname,
@@ -559,6 +573,17 @@ def save_text_encoder_output_cache_z_image(item_info: ItemInfo, embed: torch.Ten
     save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_Z_IMAGE_FULL)
 
 
+def save_text_encoder_output_cache_nanosaur(item_info: ItemInfo, embed: torch.Tensor):
+    """NanoSaur architecture. Fixed-length Gemma/SentencePiece text embedding."""
+    assert embed.dim() == 2, f"embed should be 2D tensor (tokens, hidden_size), got {embed.shape}"
+
+    sd = {}
+    dtype_str = dtype_to_str(embed.dtype)
+    sd[f"gemma_embed_{dtype_str}"] = embed.detach().cpu().contiguous()
+
+    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_NANOSAUR_FULL)
+
+
 def save_text_encoder_output_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
     for key, value in sd.items():
         # NaN check and show warning, replace NaN with 0
@@ -606,6 +631,7 @@ class BucketSelector:
     RESOLUTION_STEPS_KANDINSKY5 = 16
     RESOLUTION_STEPS_HUNYUAN_VIDEO_1_5 = 16
     RESOLUTION_STEPS_Z_IMAGE = 16
+    RESOLUTION_STEPS_NANOSAUR = 16
 
     ARCHITECTURE_STEPS_MAP = {
         ARCHITECTURE_HUNYUAN_VIDEO: RESOLUTION_STEPS_HUNYUAN,
@@ -621,6 +647,7 @@ class BucketSelector:
         ARCHITECTURE_KANDINSKY5: RESOLUTION_STEPS_KANDINSKY5,
         ARCHITECTURE_HUNYUAN_VIDEO_1_5: RESOLUTION_STEPS_HUNYUAN_VIDEO_1_5,
         ARCHITECTURE_Z_IMAGE: RESOLUTION_STEPS_Z_IMAGE,
+        ARCHITECTURE_NANOSAUR: RESOLUTION_STEPS_NANOSAUR,
     }
 
     def __init__(

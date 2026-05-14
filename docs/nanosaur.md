@@ -2,7 +2,7 @@
 
 本文从零开始说明如何在 `musubi-tuner` 中训练 NanoSaur-1.2B 的 LoRA。
 
-当前 NanoSaur 支持是一个**最小可运行实现**：目标是先让 musubi trainer 能跑 NanoSaur LoRA 训练。它暂时不追求大规模训练优化，也暂不支持采样预览、block swap、fp8 base、gradient checkpointing 等高级功能。
+当前 NanoSaur 支持是一个**最小可运行实现**：目标是先让 musubi trainer 能跑 NanoSaur LoRA 训练。它暂时不追求大规模训练优化，也暂不支持采样预览、block swap、fp8 base、gradient checkpointing 等高级功能。原生 NanoSaur LoRA 训练脚本同样没有实现 gradient checkpointing，省显存优先使用小 micro-batch 加梯度累积。
 
 ---
 
@@ -53,7 +53,10 @@
    │  ├─ nanosaur_utils.py
    │  └─ networks/lora_nanosaur.py
    ├─ examples/nanosaur_dataset.toml
-   └─ examples/nanosaur_minimal_train.sh
+   ├─ examples/nanosaur_minimal_train.sh
+   ├─ ns_cache_vae_latent.bat
+   ├─ ns_cache_te_latent.bat
+   └─ ns_train_lora_model.bat
 ```
 
 推荐从 musubi-tuner 目录运行命令：
@@ -240,13 +243,21 @@ musubi-tuner/examples/nanosaur_dataset.toml
 resolution = [1024, 1024]
 caption_extension = ".txt"
 batch_size = 1
-enable_bucket = false
+enable_bucket = true
+bucket_no_upscale = false
 
 [[datasets]]
 image_directory = "../dataset"
 cache_directory = "../cache/nanosaur_1024_fp16"
 num_repeats = 1
 ```
+
+说明：
+
+- `batch_size = 1` 是训练 micro-batch。1024 分辨率下 NanoSaur 激活显存很高，不建议直接设成 4；需要等效 batch 4 时，用训练参数 `--gradient_accumulation_steps 4`。
+- `enable_bucket = true` 会按图片长宽比分桶；分桶后 latent cache 文件名包含 bucket resolution。
+- `bucket_no_upscale = false` 是默认值，这里显式写出。它会把图片 resize/crop 到目标面积附近的 bucket，通常更适合 LoRA 训练。
+- NanoSaur 当前 bucket 步长来自 VAE/DINO patch16 的空间对齐约束，默认按 16 的倍数生成 bucket；不建议硬改为 64。64 只是更粗的分桶策略，不是原生要求。
 
 如果你在 `musubi-tuner` 目录运行命令，上面的相对路径指向：
 
@@ -277,6 +288,8 @@ image_directory = "/path/to/your/dataset"
 cache_directory = "/path/to/your/cache/nanosaur_1024_fp16"
 ```
 
+如果修改了 `enable_bucket`、`resolution` 或 `cache_directory`，请重新生成 latent cache；如果换了 `cache_directory`，text encoder cache 和 `uncond_ns_te.safetensors` 也需要在新目录重新生成。
+
 ---
 
 ## 7. 第一步：缓存 VAE latents
@@ -294,14 +307,15 @@ python -m musubi_tuner.nanosaur_cache_latents \
   --dataset_config ./examples/nanosaur_dataset.toml \
   --vae ../model/nanosaur_vae_decoder.safetensors \
   --vae_dtype fp16 \
-  --batch_size 4 \
+  --batch_size 1 \
+  --num_workers 1 \
   --skip_existing
 ```
 
 作用：
 
 1. 读取 `dataset/` 图片；
-2. resize / crop 到 1024；
+2. resize / crop 到 1024 附近的 bucket resolution；
 3. 用 NanoSaur VAE 编码 latent；
 4. 写入 `cache/nanosaur_1024_fp16/`。
 
@@ -309,7 +323,7 @@ python -m musubi_tuner.nanosaur_cache_latents \
 
 ```text
 cache/nanosaur_1024_fp16/image001_1024x1024_ns.safetensors
-cache/nanosaur_1024_fp16/image002_1024x1024_ns.safetensors
+cache/nanosaur_1024_fp16/image002_0768x1344_ns.safetensors
 ```
 
 参数说明：
@@ -320,6 +334,7 @@ cache/nanosaur_1024_fp16/image002_1024x1024_ns.safetensors
 | `--vae` | NanoSaur VAE 权重 |
 | `--vae_dtype fp16` | 用 fp16 缓存 VAE latent |
 | `--batch_size` | VAE 编码 batch size，显存不足就调小 |
+| `--num_workers` | DataLoader worker 数，Windows 上先用 1 更稳 |
 | `--skip_existing` | 已存在 cache 就跳过，方便断点续跑 |
 
 ---
@@ -336,6 +351,8 @@ python -m musubi_tuner.nanosaur_cache_text_encoder_outputs \
   --batch_size 8 \
   --skip_existing
 ```
+
+text encoder cache 不依赖 bucket resolution；但训练会在 dataset config 的同一个 `cache_directory` 查找 text cache，所以换 cache 目录后仍要重新生成或复制 text cache。
 
 作用：
 
@@ -374,29 +391,31 @@ accelerate launch --num_processes 1 \
   --vae ../model/nanosaur_vae_decoder.safetensors \
   --uncond_text_embedding ../cache/nanosaur_1024_fp16/uncond_ns_te.safetensors \
   --network_module musubi_tuner.networks.lora_nanosaur \
-  --network_dim 16 \
+  --network_dim 8 \
   --network_alpha 4 \
   --network_dropout 0 \
+  --optimizer_type AdamW \
   --learning_rate 1e-4 \
   --mixed_precision bf16 \
+  --gradient_accumulation_steps 4 \
   --sdpa \
-  --max_train_steps 1000 \
-  --save_every_n_steps 500 \
-  --output_dir ../outputs/nanosaur_musubi_lora \
-  --output_name nanosaur_lora
+  --max_train_epochs 10 \
+  --save_every_n_epochs 1 \
+  --output_dir ../outputs/nanosaur_adamw_10epoch_lora \
+  --output_name nanosaur_adamw_10epoch_lora
 ```
 
 训练输出目录：
 
 ```text
-outputs/nanosaur_musubi_lora/
+outputs/nanosaur_adamw_10epoch_lora/
 ```
 
 每次保存时会生成：
 
 ```text
-nanosaur_lora-000000500.safetensors
-nanosaur_lora-000000500-comfyui.safetensors
+nanosaur_adamw_10epoch_lora-000000001.safetensors
+nanosaur_adamw_10epoch_lora-000000001-comfyui.safetensors
 ```
 
 其中：
@@ -436,6 +455,16 @@ CACHE_DIR=../cache/nanosaur_1024_fp16 \
 OUTPUT_DIR=../outputs/my_nanosaur_lora \
 bash examples/nanosaur_minimal_train.sh
 ```
+
+Windows 下也提供了三个简单 bat 范例，均假设从 `musubi-tuner` 目录运行，并使用项目根目录的 `venv`：
+
+```text
+ns_cache_vae_latent.bat  # 生成 VAE latent cache
+ns_cache_te_latent.bat   # 生成 text encoder cache 和 uncond_ns_te.safetensors
+ns_train_lora_model.bat  # AdamW 1e-4 训练 10 epoch，每个 epoch 保存一次
+```
+
+这些 bat 只使用相对路径，按需直接编辑即可。
 
 ---
 
@@ -518,13 +547,16 @@ accelerate launch --num_processes 1 \
 
 | 参数 | 推荐值 | 说明 |
 |---|---:|---|
-| `--network_dim` | `16` | LoRA rank，越大参数越多 |
+| `--network_dim` | `8` 或 `16` | LoRA rank，越大参数越多；显存紧张先用 8 |
 | `--network_alpha` | `4` | LoRA alpha，当前沿用原项目默认 |
 | `--network_dropout` | `0` | LoRA dropout，先用 0 跑通 |
 | `--learning_rate` | `1e-4` | LoRA 学习率 |
 | `--mixed_precision` | `bf16` | 推荐 NVIDIA 新卡用 bf16 |
+| `--gradient_accumulation_steps` | `4` | 用 micro-batch 1 模拟等效 batch 4，显著降低显存 |
 | `--sdpa` | 开启 | 使用 PyTorch SDPA attention 路径 |
-| `--max_train_steps` | `1000` 起 | 先小步数测试 |
+| `--max_train_epochs` | `10` | 以 epoch 控制训练轮数时使用 |
+| `--save_every_n_epochs` | `1` | 每个 epoch 保存一次 |
+| `--max_train_steps` | `1000` 起 | 也可以用 step 控制训练 |
 | `--save_every_n_steps` | `500` | 每多少 step 保存一次 |
 | `--cond_dropout` | `0.1` | 随机使用空文本条件的概率 |
 | `--timestep_sampling_alpha` | `2.0` | NanoSaur 当前 timestep sampling 参数 |
@@ -545,6 +577,8 @@ accelerate launch --num_processes 1 \
 原因：当前目标是先跑通 NanoSaur LoRA 训练，以上能力还没有接入 NanoSaur adapter。
 
 如果你传了这些参数，脚本会直接报错或提示暂不支持。
+
+原生 `nanosaur_support/train_lora.py` 也没有实现 gradient checkpointing、block swap 或 activation offload。它默认显存较低的主要原因是 `BATCH_SIZE = 1`。在 musubi 中建议保持 dataset `batch_size = 1`，用 `--gradient_accumulation_steps` 提升等效 global batch。
 
 ---
 
@@ -592,13 +626,29 @@ $env:PYTHONPATH = "..;$env:PYTHONPATH"
 
 ### 15.3 CUDA 显存不足
 
-先调小：
+优先确认 dataset config 中的 `batch_size` 是 micro-batch，而不是等效总 batch。1024 分辨率下 NanoSaur latent 约为 `96 x 64 x 64`，DiT 会在 64x64 token 网格上反传；即使只训练 LoRA，也需要保留大量激活。`batch_size = 4` 会把激活显存近似放大 4 倍。
+
+推荐配置：
+
+```toml
+batch_size = 1
+```
+
+训练命令中使用：
+
+```bash
+--gradient_accumulation_steps 4
+```
+
+这样等效 batch 仍是 4，但显存按 micro-batch 1 计算。
+
+如果仍然不足，再调小：
 
 ```text
 cache latent batch_size
 训练 dataset batch_size
-gradient_accumulation_steps
 network_dim
+resolution
 ```
 
 最小测试建议：
@@ -608,6 +658,8 @@ batch_size = 1
 network_dim = 8 或 16
 max_train_steps = 100
 ```
+
+注意：当前 NanoSaur musubi adapter 和原生 NanoSaur LoRA 脚本都没有实现 gradient checkpointing；传 `--gradient_checkpointing` 会直接报错。
 
 ### 15.4 没有生成 `uncond_ns_te.safetensors`
 
@@ -667,6 +719,46 @@ ss_base_model_version = nanosaur
 
 这是 NanoSaur trainer 中 `model_pred` 与 `target` dtype 未统一导致的反传错误。当前已在 `nanosaur_train_network.py` 中将二者统一到 `network_dtype` 后再计算 loss。
 
+### 15.10 分桶步长为什么是 16？要不要改成 64？
+
+NanoSaur 的默认 bucket 步长是 16，来源于原生 VAE / DINO patch16 的空间对齐要求：输入宽高至少需要按 16 对齐，VAE latent 空间约为 `H/16 x W/16`。因此 16 是最小硬约束。
+
+不建议把默认值硬改成 64。64 是 16 的倍数，模型层面通常安全，但它只是更粗的分桶策略，会减少 bucket 数、改变 resize/crop 粒度，对极端宽高比图片可能降低分辨率利用率。如果确实需要 64，应作为额外可配置项实现，并校验它是 16 的倍数。
+
+当前示例使用：
+
+```toml
+enable_bucket = true
+bucket_no_upscale = false
+```
+
+`bucket_no_upscale = false` 是默认值，显式写出是为了避免误解。
+
+### 15.11 保存的 LoRA 是 bf16 吗？为什么文件看起来变大？
+
+当前 NanoSaur trainer 保存 LoRA 时使用 `dit_dtype` 作为保存 dtype。通常命令里传：
+
+```bash
+--mixed_precision bf16
+```
+
+且不额外覆盖 `--dit_dtype` 时，`dit_dtype` 会被设置为 bf16，`lora_nanosaur.py` 会在保存前把浮点 LoRA tensor cast 到 bf16。因此单个 LoRA 文件正常应是 bf16，不是 fp32。
+
+如果觉得文件或输出目录变大，通常是这些原因：
+
+1. `--network_dim` 变大。LoRA 文件大小基本跟 rank 线性相关，rank 8 约为 rank 4 的 2 倍，rank 16 约为 rank 4 的 4 倍；
+2. 每次保存会同时生成训练格式和 ComfyUI 格式两份：`*.safetensors` 与 `*-comfyui.safetensors`；
+3. `--save_every_n_epochs 1` 会每个 epoch 保存一次，训练结束还会保存最终版本，所以整个输出目录会累积多组文件；
+4. `--network_alpha` 不明显影响文件大小，它主要影响 LoRA scale。
+
+可以用下面命令检查某个 LoRA 文件里的 dtype：
+
+```bash
+python -c "from safetensors.torch import load_file; p='path/to/lora.safetensors'; sd=load_file(p, device='cpu'); print(sorted({str(v.dtype) for v in sd.values()})); print(len(sd))"
+```
+
+如果输出包含 `torch.bfloat16`，说明保存的是 bf16。ComfyUI 文件会多出 alpha tensor，tensor 数量比训练格式更多，这是正常的。
+
 ---
 
 ## 16. 推荐第一次 smoke test
@@ -717,6 +809,7 @@ nanosaur_smoke-000000050-comfyui.safetensors
 - latent cache：97 个 `*_ns.safetensors`；
 - text cache：97 个 `*_ns_te.safetensors` + `uncond_ns_te.safetensors`；
 - 训练：`max_train_steps=1`，`network_dim=4`，`mixed_precision=bf16`，`optimizer_type=AdamW`；
+- 额外验证：`optimizer_type=Adafactor` 可完成 1 step 训练并保存 LoRA；optimizer/scheduler 仍沿用 musubi 通用逻辑，但 `bitsandbytes`、`wandb`、`tensorboard` 等可选能力取决于环境是否安装对应依赖；
 - 输出目录：`outputs/nanosaur_smoke_lora/`。
 
 已验证生成并可加载：

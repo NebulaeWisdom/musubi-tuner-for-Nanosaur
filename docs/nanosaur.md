@@ -2,7 +2,7 @@
 
 本文从零开始说明如何在 `musubi-tuner` 中训练 NanoSaur-1.2B 的 LoRA。
 
-NanoSaur 支持从 musubi-tuner v0.2.15 开始逐步完善，目前已内置 `nanosaur_support` 模块（无需外部依赖），并实现了 gradient checkpointing 支持。
+NanoSaur 支持从 musubi-tuner v0.2.15 开始逐步完善，已实现 gradient checkpointing 支持。
 
 ---
 
@@ -44,8 +44,11 @@ NanoSaur 支持从 musubi-tuner v0.2.15 开始逐步完善，目前已内置 `na
 │  ├─ nanosaur_text_encoder.safetensors
 │  └─ nanosaur_vae_decoder.safetensors
 └─ musubi-tuner/
-   ├─ nanosaur_support/              ← 模型定义（已内置）
    ├─ src/musubi_tuner/
+   │  ├─ nanosaur/
+   │  │  ├─ __init__.py
+   │  │  ├─ model.py
+   │  │  └─ vae.py
    │  ├─ nanosaur_cache_latents.py
    │  ├─ nanosaur_cache_text_encoder_outputs.py
    │  ├─ nanosaur_train_network.py
@@ -606,11 +609,9 @@ cache/nanosaur_1024_fp16/*.safetensors
 *_ns_te.safetensors
 ```
 
-### 15.2 找不到 `nanosaur_support`
+### 15.2 找不到模型定义
 
-`nanosaur_support` 已内置在 musubi-tuner 目录中，无需额外安装或配置 `PYTHONPATH`。克隆 musubi-tuner 后直接可用。
-
-如果你从旧版本升级，请确保 musubi-tuner 目录下存在 `nanosaur_support/` 子目录。
+NanoSaur 模型定义在 `musubi_tuner.nanosaur` 包中，通过 `pip install -e .` 安装后可直接使用。
 
 ### 15.3 CUDA 显存不足
 

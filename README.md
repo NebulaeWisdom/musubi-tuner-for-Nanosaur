@@ -3,10 +3,11 @@
 [English](./README.md) | [日本語](./README.ja.md)
 
 
-**This fork is dedicated to NanoSaur training with musubi-tuner.** Full training guide: [`docs/nanosaur.md`](./docs/nanosaur.md)
+**This fork is dedicated to NanoSaur training with musubi-tuner.**
+Training guide: [English](./docs/nanosaur_en.md) | [中文](./docs/nanosaur.md)
 
-
-**本仓库是 musubi-tuner 的 NanoSaur 训练专用分支。** 完整训练指南：[`docs/nanosaur.md`](./docs/nanosaur.md)
+**本仓库是 musubi-tuner 的 NanoSaur 训练专用分支。**
+训练指南：[中文](./docs/nanosaur.md) | [English](./docs/nanosaur_en.md)
 
 <details>
 <summary>Click to expand</summary>

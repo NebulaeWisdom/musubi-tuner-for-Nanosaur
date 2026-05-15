@@ -38,7 +38,6 @@ NanoSaur 支持从 musubi-tuner v0.2.15 开始逐步完善，目前已内置 `na
 
 ```text
 <repo-root>/
-├─ download_model.py
 ├─ dataset/
 ├─ model/
 │  ├─ nanosaur_diffusion_model.safetensors
@@ -142,26 +141,24 @@ accelerate launch --num_processes 1 ...
 
 ## 4. 下载 NanoSaur 模型
 
-回到项目根目录：
+从以下任一地址下载模型文件，放到 `<repo-root>/model/` 目录下：
 
-```bash
-cd <repo-root>
-python download_model.py
-```
+- **HuggingFace:** https://huggingface.co/well9472/Nanosaur-1.2B-Preview
+- **ModelScope:** https://modelscope.cn/models/xiaobaibai030/well9472-Nanosaur-1.2B-Preview
 
-该脚本会下载：
+需要下载的文件：
 
 ```text
-model/nanosaur_diffusion_model.safetensors
-model/nanosaur_text_encoder.safetensors
-model/nanosaur_vae_decoder.safetensors
+nanosaur_diffusion_model.safetensors
+nanosaur_text_encoder.safetensors
+nanosaur_vae_decoder.safetensors
 ```
 
-模型来源：
-
-```text
-xiaobaibai030/well9472-Nanosaur-1.2B-Preview
-```
+> 如果你有 `huggingface_hub`，也可以用命令行下载：
+> ```bash
+> pip install huggingface_hub
+> huggingface-cli download well9472/Nanosaur-1.2B-Preview nanosaur_diffusion_model.safetensors nanosaur_text_encoder.safetensors nanosaur_vae_decoder.safetensors --local-dir model/
+> ```
 
 下载完成后检查：
 

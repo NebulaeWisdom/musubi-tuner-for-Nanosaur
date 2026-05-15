@@ -1,5 +1,4 @@
 import math
-import sys
 from pathlib import Path
 
 from einops import rearrange
@@ -10,26 +9,7 @@ from torch.utils.checkpoint import checkpoint
 from safetensors.torch import load_file as load_safetensors_file
 from transformers import Gemma3ForCausalLM, Gemma3TextConfig
 
-try:
-    from nanosaur_support.model import NanoSaurTransformer2DModel
-    from nanosaur_support.vae import NanoSaurVAE
-except ImportError as exc:  # pragma: no cover - keeps import error actionable for users
-    repo_root = Path(__file__).resolve().parents[2]
-    if (repo_root / "nanosaur_support").is_dir():
-        sys.path.insert(0, str(repo_root))
-        try:
-            from nanosaur_support.model import NanoSaurTransformer2DModel
-            from nanosaur_support.vae import NanoSaurVAE
-        except ImportError:
-            raise ImportError(
-                "NanoSaur support modules were not found. Run musubi-tuner from the repository root "
-                "or add that repository root to PYTHONPATH."
-            ) from exc
-    else:
-        raise ImportError(
-            "NanoSaur support modules were not found. Run musubi-tuner from the repository root "
-            "or add that repository root to PYTHONPATH."
-        ) from exc
+from .nanosaur import NanoSaurTransformer2DModel, NanoSaurVAE
 
 
 TEXT_MAX_LENGTH = 128

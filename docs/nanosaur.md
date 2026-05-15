@@ -2,7 +2,7 @@
 
 本文从零开始说明如何在 `musubi-tuner` 中训练 NanoSaur-1.2B 的 LoRA。
 
-当前 NanoSaur 支持是一个**最小可运行实现**：目标是先让 musubi trainer 能跑 NanoSaur LoRA 训练。它暂时不追求大规模训练优化，也暂不支持采样预览、block swap、fp8 base、gradient checkpointing 等高级功能。原生 NanoSaur LoRA 训练脚本同样没有实现 gradient checkpointing，省显存优先使用小 micro-batch 加梯度累积。
+NanoSaur 支持从 musubi-tuner v0.2.15 开始逐步完善，目前已内置 `nanosaur_support` 模块（无需外部依赖），并实现了 gradient checkpointing 支持。
 
 ---
 
@@ -16,13 +16,13 @@
 - NanoSaur LoRA 注入；
 - 使用 musubi `NetworkTrainer` 训练 LoRA；
 - 使用 `accelerate launch` 单卡或多卡启动；
+- gradient checkpointing（`--gradient_checkpointing`）；
 - 保存训练 LoRA；
 - 同步导出 `-comfyui.safetensors` LoRA。
 
 暂不支持：
 
 - `--sample_prompts` 训练中采样；
-- `--gradient_checkpointing`；
 - `--blocks_to_swap`；
 - `--fp8_base`；
 - 全参训练；
@@ -44,8 +44,8 @@
 │  ├─ nanosaur_diffusion_model.safetensors
 │  ├─ nanosaur_text_encoder.safetensors
 │  └─ nanosaur_vae_decoder.safetensors
-├─ nanosaur_support/
 └─ musubi-tuner/
+   ├─ nanosaur_support/              ← 模型定义（已内置）
    ├─ src/musubi_tuner/
    │  ├─ nanosaur_cache_latents.py
    │  ├─ nanosaur_cache_text_encoder_outputs.py
@@ -398,6 +398,7 @@ accelerate launch --num_processes 1 \
   --learning_rate 1e-4 \
   --mixed_precision bf16 \
   --gradient_accumulation_steps 4 \
+  --gradient_checkpointing \
   --sdpa \
   --max_train_epochs 10 \
   --save_every_n_epochs 1 \
@@ -484,6 +485,7 @@ accelerate launch --num_processes 4 \
   --network_alpha 4 \
   --learning_rate 1e-4 \
   --mixed_precision bf16 \
+  --gradient_checkpointing \
   --sdpa \
   --gradient_accumulation_steps 4 \
   --max_train_steps 1000 \
@@ -553,6 +555,7 @@ accelerate launch --num_processes 1 \
 | `--learning_rate` | `1e-4` | LoRA 学习率 |
 | `--mixed_precision` | `bf16` | 推荐 NVIDIA 新卡用 bf16 |
 | `--gradient_accumulation_steps` | `4` | 用 micro-batch 1 模拟等效 batch 4，显著降低显存 |
+| `--gradient_checkpointing` | 开启 | 用重计算换显存，推荐开启 |
 | `--sdpa` | 开启 | 使用 PyTorch SDPA attention 路径 |
 | `--max_train_epochs` | `10` | 以 epoch 控制训练轮数时使用 |
 | `--save_every_n_epochs` | `1` | 每个 epoch 保存一次 |
@@ -569,16 +572,21 @@ accelerate launch --num_processes 1 \
 
 ```text
 --sample_prompts
---gradient_checkpointing
 --blocks_to_swap
 --fp8_base
 ```
 
-原因：当前目标是先跑通 NanoSaur LoRA 训练，以上能力还没有接入 NanoSaur adapter。
+原因：以上能力还没有接入 NanoSaur adapter。
 
 如果你传了这些参数，脚本会直接报错或提示暂不支持。
 
-原生 `nanosaur_support/train_lora.py` 也没有实现 gradient checkpointing、block swap 或 activation offload。它默认显存较低的主要原因是 `BATCH_SIZE = 1`。在 musubi 中建议保持 dataset `batch_size = 1`，用 `--gradient_accumulation_steps` 提升等效 global batch。
+已支持的优化功能：
+
+```text
+--gradient_checkpointing
+```
+
+gradient checkpointing 通过对 26 个 encoder block 和 2 个 text refine block 做重计算来降低显存。传入 `--gradient_checkpointing` 后，trainer 会自动将 transformer 设为训练模式并启用检查点。注意：这会让每步训练稍慢（反向传播时需重跑 forward），但能显著降低显存峰值。
 
 ---
 
@@ -603,26 +611,9 @@ cache/nanosaur_1024_fp16/*.safetensors
 
 ### 15.2 找不到 `nanosaur_support`
 
-NanoSaur musubi adapter 会导入：
+`nanosaur_support` 已内置在 musubi-tuner 目录中，无需额外安装或配置 `PYTHONPATH`。克隆 musubi-tuner 后直接可用。
 
-```python
-nanosaur_support.model
-nanosaur_support.vae
-```
-
-当前代码会在常规仓库布局下自动把 `<repo-root>` 仓库根目录加入导入路径。若你移动了 `musubi-tuner` 目录，或仍然遇到该错误，请手动把仓库根目录加入 `PYTHONPATH`。
-
-如果你在 `musubi-tuner` 下运行，通常可以：
-
-```bash
-export PYTHONPATH=..:$PYTHONPATH
-```
-
-Windows PowerShell：
-
-```powershell
-$env:PYTHONPATH = "..;$env:PYTHONPATH"
-```
+如果你从旧版本升级，请确保 musubi-tuner 目录下存在 `nanosaur_support/` 子目录。
 
 ### 15.3 CUDA 显存不足
 
@@ -659,7 +650,7 @@ network_dim = 8 或 16
 max_train_steps = 100
 ```
 
-注意：当前 NanoSaur musubi adapter 和原生 NanoSaur LoRA 脚本都没有实现 gradient checkpointing；传 `--gradient_checkpointing` 会直接报错。
+显存仍然紧张时可添加 `--gradient_checkpointing` 进一步降低激活显存。
 
 ### 15.4 没有生成 `uncond_ns_te.safetensors`
 
@@ -783,6 +774,7 @@ accelerate launch --num_processes 1 \
   --network_alpha 4 \
   --learning_rate 1e-4 \
   --mixed_precision bf16 \
+  --gradient_checkpointing \
   --sdpa \
   --max_train_steps 100 \
   --save_every_n_steps 50 \
@@ -833,8 +825,8 @@ outputs/nanosaur_smoke_lora/nanosaur_smoke_lora-step00000001-comfyui.safetensors
 
 - 训练中 sample；
 - 更完整的 resume optimizer/scheduler 状态说明；
-- gradient checkpointing；
 - block swap；
+- fp8 base 训练；
 - 更高效的大规模 cache；
 - NanoSaur LoRA 推理加载命令；
 - ComfyUI 节点验证流程。

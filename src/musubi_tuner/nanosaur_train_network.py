@@ -39,8 +39,6 @@ class NanoSaurNetworkTrainer(NetworkTrainer):
         self.cond_dropout = args.cond_dropout
         if not args.dit:
             raise ValueError("--dit is required for NanoSaur training")
-        if args.gradient_checkpointing:
-            raise ValueError("NanoSaur minimal musubi support does not implement --gradient_checkpointing yet")
         if args.blocks_to_swap:
             raise ValueError("NanoSaur minimal musubi support does not implement --blocks_to_swap yet")
         if args.fp8_base:

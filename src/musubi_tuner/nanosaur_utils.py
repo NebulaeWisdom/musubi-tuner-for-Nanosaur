@@ -2,9 +2,11 @@ import math
 import sys
 from pathlib import Path
 
+from einops import rearrange
 import sentencepiece as spm
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from safetensors.torch import load_file as load_safetensors_file
 from transformers import Gemma3ForCausalLM, Gemma3TextConfig
 
@@ -177,6 +179,8 @@ class NanoSaurTransformerForTraining(NanoSaurTransformer2DModel):
         )
         self.projector = nn.Module()
         self.projector.conv = nn.Conv2d(MODEL_DIM, MODEL_CHANNELS, kernel_size=3, padding=1)
+        self.gradient_checkpointing = False
+        self.cpu_offload_checkpointing = False
 
     def forward(self, x, timestep, context=None, **kwargs):
         if context is None:
@@ -188,7 +192,91 @@ class NanoSaurTransformerForTraining(NanoSaurTransformer2DModel):
         return (x - x0) / timestep.view(-1, 1, 1, 1)
 
     def enable_gradient_checkpointing(self, cpu_offload: bool = False):
-        raise NotImplementedError("NanoSaur minimal musubi support does not implement gradient checkpointing yet.")
+        self.gradient_checkpointing = True
+        self.cpu_offload_checkpointing = cpu_offload
+
+    def _use_checkpoint(self) -> bool:
+        return self.training and self.gradient_checkpointing
+
+    def _checkpoint(self, func, *args, **kwargs):
+        """Wrap a block call with gradient checkpointing when enabled."""
+        if self._use_checkpoint():
+            if self.cpu_offload_checkpointing:
+                from musubi_tuner.utils.model_utils import create_cpu_offloading_wrapper
+                device = next(func.parameters()).device
+                func = create_cpu_offloading_wrapper(func, device)
+            return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False, **kwargs)
+        return func(*args, **kwargs)
+
+    def _forward(self, x: torch.Tensor, timesteps: torch.Tensor, context: torch.Tensor, uncond: bool = False, token_weights: torch.Tensor | None = None) -> torch.Tensor:
+        device = self.s_embedder.proj.weight.device
+        embed_dtype = self.s_embedder.proj.weight.dtype
+        if context.device != device:
+            context = context.to(device)
+        y_emb = self.y_embedder(context).view(context.size(0), -1, self.hidden_size).to(embed_dtype)
+        batch, _, height, width = x.shape
+        x_tokens = rearrange(x, "b c (h p1) (w p2) -> b (h w) (c p1 p2)", p1=self.patch_size, p2=self.patch_size)
+        xpos = self.fetch_pos(height // self.patch_size, width // self.patch_size, x.device)
+        t_emb = self.t_embedder(timesteps.view(-1)).view(batch, -1, self.hidden_size)
+        condition = torch.nn.functional.silu(t_emb)
+        y_latent = y_emb.to(dtype=t_emb.dtype)
+
+        for block in self.text_refine_blocks:
+            y_latent = self._checkpoint(block, y_latent, condition)
+
+        s = self.s_embedder(x_tokens)
+        h_patches, w_patches = height // self.patch_size, width // self.patch_size
+
+        # ---- Encoder forward section (sprint_num_f) ----
+        for i in range(self.sprint_num_f):
+            s = self._checkpoint(
+                self.blocks[i], s, y_latent, condition, xpos,
+                shared_ada_ln=self.shared_encoder_adaLN,
+                local_context=self.local_context,
+                layer_idx=i, h=h_patches, w=w_patches,
+                y_token_weights=token_weights,
+            )
+
+        s_enc = s
+        s_sparse = s
+        # ---- Sprint middle section (sprint_num_g) ----
+        for i in range(self.sprint_num_f, self.sprint_num_f + self.sprint_num_g):
+            if not uncond:
+                s_sparse = self._checkpoint(
+                    self.blocks[i], s_sparse, y_latent, condition, xpos,
+                    shared_ada_ln=self.shared_encoder_adaLN,
+                    y_token_weights=token_weights,
+                )
+
+        g_pad = self.mask_token2.expand_as(s_sparse) if uncond else s_sparse
+        s = self._sprint_fuse(s_enc, g_pad)
+
+        # ---- Encoder backward section (sprint_num_h) ----
+        for i in range(self.sprint_num_f + self.sprint_num_g, len(self.blocks)):
+            s = self._checkpoint(
+                self.blocks[i], s, y_latent, condition, xpos,
+                shared_ada_ln=self.shared_encoder_adaLN,
+                local_context=self.local_context,
+                layer_idx=i, h=h_patches, w=w_patches,
+                y_token_weights=token_weights,
+            )
+
+        s = torch.nn.functional.silu(t_emb + s)
+        batch_size, length, _ = s.shape
+        x_dec = x_tokens.reshape(batch_size * length, self.in_channels, self.patch_size**2).transpose(1, 2)
+        s_dec = s.view(batch_size * length, self.hidden_size)
+        x_dec = self.x_embedder(x_dec)
+        x_dec = self.dec_net(x_dec, s_dec).transpose(1, 2).reshape(batch_size, length, -1)
+
+        return rearrange(
+            x_dec,
+            "b (h w) (c p1 p2) -> b c (h p1) (w p2)",
+            h=height // self.patch_size,
+            w=width // self.patch_size,
+            p1=self.patch_size,
+            p2=self.patch_size,
+            c=self.in_channels,
+        )
 
 
 def load_nanosaur_transformer(

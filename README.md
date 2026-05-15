@@ -2,13 +2,13 @@
 
 [English](./README.md) | [日本語](./README.ja.md)
 
-> **本仓库是 musubi-tuner 的 NanoSaur 训练专用分支。** 常见问题：[中文](https://github.com/NebulaeWisdom/musubi-tuner) · 完整训练指南：[`docs/nanosaur.md`](./docs/nanosaur.md)
+> **本仓库是 musubi-tuner 的 NanoSaur 训练专用分支。** 完整训练指南：[`docs/nanosaur.md`](./docs/nanosaur.md)
 >
 > **注意：** 内置的 `nanosaur_support/` 是为训练修改的 fork，与 [well9472 原版 NanoSaur-1.2B](https://huggingface.co/well9472/Nanosaur-1.2B-Preview) 不同。若需在 ComfyUI 中进行推理，请使用原版模型，**勿**使用本仓库 `nanosaur_support/` 内的文件。
 >
 > ---
 >
-> **This fork is dedicated to NanoSaur training with musubi-tuner.** FAQ: [Chinese](https://github.com/NebulaeWisdom/musubi-tuner) · Full training guide: [`docs/nanosaur.md`](./docs/nanosaur.md)
+> **This fork is dedicated to NanoSaur training with musubi-tuner.** Full training guide: [`docs/nanosaur.md`](./docs/nanosaur.md)
 >
 > **Note:** The bundled `nanosaur_support/` is a modified training fork that differs from the [original NanoSaur-1.2B by well9472](https://huggingface.co/well9472/Nanosaur-1.2B-Preview). For ComfyUI inference, use the original model — do **not** use the files in `nanosaur_support/` for inference.
 >
